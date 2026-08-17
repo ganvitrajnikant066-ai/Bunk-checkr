@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<title>Attendance Register</title>
+<meta name="theme-color" content="#1B3626" />
+<link rel="icon" href="data:," />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; }
+  .paper-card {
+    background: #EFE7D2;
+    border: 1px solid #C9BE9E;
+    box-shadow: 0 20px 40px -20px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.15) inset;
+  }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+const PALETTE = {
+  board: "#1B3626",
+  boardDark: "#132A1C",
+  boardLine: "#2E5240",
+  paper: "#EFE7D2",
+  paperDark: "#E3D9BE",
+  paperLine: "#C9BE9E",
+  ink: "#2A2620",
+  inkSoft: "#5C5648",
+  green: "#2E6B49",
+  greenDeep: "#1F4E36",
+  red: "#A8402C",
+  redDeep: "#7E2E20",
+  gold: "#D8AE4E",
+  goldSoft: "#EAD9A6",
+};
+
+const STORAGE_KEY = "attendance-register-data";
+
+function computeStatus(present, total, target) {
+  if (total <= 0) return { pct: null, kind: "empty" };
+  const pct = (present / total) * 100;
+  const tFrac = target / 100;
+  if (pct >= target) {
+    const rawA = tFrac > 0 ? present / tFrac - total : Infinity;
+    const a = Math.max(0, Math.floor(rawA + 1e-9));
+    return { pct, kind: "safe", canMiss: a };
+  } else {
+    if (target >= 100) return { pct, kind: "unreachable" };
+    const rawN = (target * total - 100 * present) / (100 - target);
+    const n = Math.max(1, Math.ceil(rawN - 1e-9));
+    return { pct, kind: "behind", mustAttend: n };
+  }
+}
+
+function verdictCopy(status, target) {
+  if (status.kind === "empty") return { text: "Enter classes held to see the math.", color: PALETTE.inkSoft };
+  if (status.kind === "safe") {
+    return status.canMiss > 0
+      ? { text: `Can miss ${status.canMiss} more and stay ≥ ${target}%.`, color: PALETTE.green }
+      : { text: `Right at the line — one more miss drops you below ${target}%.`, color: PALETTE.green };
+  }
+  if (status.kind === "behind") {
+    return { text: `Attend the next ${status.mustAttend} in a row to reach ${target}%.`, color: PALETTE.red };
+  }
+  return { text: `Not reachable once a class is missed at ${target}%.`, color: PALETTE.red };
+}
+
+function clampInt(v) {
+  const n = parseInt(v, 10);
+  if (isNaN(n) || n < 0) return 0;
+  return n;
+}
+
+function MiniGauge({ pct, target, size = 64 }) {
+  const stroke = 7;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, pct ?? 0));
+  const offset = c - (clamped / 100) * c;
+  const safe = pct !== null && pct >= target;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={PALETTE.paperLine} strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none"
+          stroke={safe ? PALETTE.green : PALETTE.red} strokeWidth={stroke}
+          strokeDasharray={c} strokeDashoffset={pct === null ? c : offset}
+          strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s ease, stroke 0.3s ease" }}
+        />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: PALETTE.ink }}>
+          {pct === null ? "—" : `${Math.round(pct)}%`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Gauge({ pct, target, size = 176 }) {
+  const stroke = 14;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, pct ?? 0));
+  const offset = c - (clamped / 100) * c;
+  const targetAngle = (target / 100) * 360 - 90;
+  const safe = pct !== null && pct >= target;
+  return (
+    <div style={{ position: "relative", width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={PALETTE.paperLine} strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none"
+          stroke={safe ? PALETTE.green : PALETTE.red} strokeWidth={stroke}
+          strokeDasharray={c} strokeDashoffset={pct === null ? c : offset}
+          strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.6s ease, stroke 0.3s ease" }}
+        />
+      </svg>
+      <div style={{ position: "absolute", top: "50%", left: "50%", width: size, height: size, transform: `translate(-50%,-50%) rotate(${targetAngle}deg)`, pointerEvents: "none" }}>
+        <div style={{ position: "absolute", top: -2, left: "50%", width: 3, height: stroke + 8, background: PALETTE.gold, transform: "translateX(-50%)", borderRadius: 2 }} />
+      </div>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 34, fontWeight: 700, color: PALETTE.ink, lineHeight: 1 }}>
+          {pct === null ? "—" : `${pct.toFixed(1)}`}<span style={{ fontSize: 16, fontWeight: 500 }}>%</span>
+        </span>
+        <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: PALETTE.inkSoft, marginTop: 4 }}>
+          target {target}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function NumberField({ label, value, onChange }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <div style={{ fontSize: 10.5, color: PALETTE.inkSoft, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>
+        {label}
+      </div>
+      <input
+        type="number" inputMode="numeric" min={0} value={value}
+        onChange={(e) => onChange(clampInt(e.target.value))}
+        onFocus={(e) => e.target.select()}
+        style={{
+          width: "100%", background: PALETTE.paperDark, border: `1px solid ${PALETTE.paperLine}`,
+          borderRadius: 8, padding: "8px 10px", fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 15, fontWeight: 700, color: PALETTE.ink, textAlign: "center",
+        }}
+      />
+    </div>
+  );
+}
+
+function SubjectCard({ subject, target, onUpdate, onDelete }) {
+  const status = computeStatus(subject.attended, subject.total, target);
+  const verdict = verdictCopy(status, target);
+
+  const setAttended = (v) => {
+    onUpdate({ ...subject, attended: v > subject.total ? subject.total : v, total: v > subject.total ? v : subject.total });
+  };
+  const setTotal = (v) => {
+    onUpdate({ ...subject, total: v, attended: Math.min(subject.attended, v) });
+  };
+
+  return (
+    <div className="paper-card" style={{ borderRadius: 16, padding: "14px 16px", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <input
+          value={subject.name}
+          onChange={(e) => onUpdate({ ...subject, name: e.target.value })}
+          placeholder="Subject name"
+          style={{ flex: 1, background: "none", border: "none", borderBottom: `1px solid ${PALETTE.paperLine}`, fontFamily: "'Special Elite', monospace", fontSize: 15, color: PALETTE.ink, padding: "4px 2px" }}
+        />
+        <button onClick={onDelete} style={{ background: "none", border: "none", cursor: "pointer", color: PALETTE.inkSoft, padding: 4, flexShrink: 0, fontSize: 15 }} aria-label="Delete subject">
+          ✕
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+        <MiniGauge pct={status.pct} target={target} />
+        <div style={{ flex: 1, display: "flex", gap: 8 }}>
+          <NumberField label="Attended" value={subject.attended} onChange={setAttended} />
+          <NumberField label="Held" value={subject.total} onChange={setTotal} />
+        </div>
+      </div>
+      <p style={{ margin: "10px 2px 0", fontSize: 12.5, fontWeight: 600, color: verdict.color, lineHeight: 1.4 }}>
+        {verdict.text}
+      </p>
+    </div>
+  );
+}
+
+function App() {
+  const [subjects, setSubjects] = useState([]);
+  const [target, setTarget] = useState(75);
+  const [loaded, setLoaded] = useState(false);
+  const [showTargetEdit, setShowTargetEdit] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.subjects)) setSubjects(parsed.subjects);
+        if (typeof parsed.target === "number") setTarget(parsed.target);
+      }
+    } catch (e) {}
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ subjects, target }));
+    } catch (e) {}
+  }, [subjects, target, loaded]);
+
+  const addSubject = () => {
+    setSubjects((prev) => [...prev, { id: Date.now() + Math.random(), name: `Subject ${prev.length + 1}`, attended: 0, total: 0 }]);
+  };
+  const updateSubject = (id, next) => setSubjects((prev) => prev.map((s) => (s.id === id ? next : s)));
+  const deleteSubject = (id) => setSubjects((prev) => prev.filter((s) => s.id !== id));
+  const doReset = () => { setSubjects([]); setConfirmReset(false); };
+
+  const totals = useMemo(() => subjects.reduce(
+    (acc, s) => ({ attended: acc.attended + (s.attended || 0), total: acc.total + (s.total || 0) }),
+    { attended: 0, total: 0 }
+  ), [subjects]);
+
+  const overallStatus = computeStatus(totals.attended, totals.total, target);
+  const overallVerdict = verdictCopy(overallStatus, target);
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: `radial-gradient(1200px 600px at 50% -10%, ${PALETTE.boardLine} 0%, ${PALETTE.board} 55%, ${PALETTE.boardDark} 100%)`,
+      padding: "28px 16px 40px", display: "flex", justifyContent: "center",
+    }}>
+      <div style={{ width: "100%", maxWidth: 440 }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div style={{ fontFamily: "'Special Elite', monospace", color: PALETTE.goldSoft, fontSize: 13, letterSpacing: "0.25em", textTransform: "uppercase", marginBottom: 4, opacity: 0.85 }}>
+            Roll Call
+          </div>
+          <h1 style={{ fontFamily: "'Special Elite', monospace", color: "#F4EFDD", fontSize: 26, margin: 0, letterSpacing: "0.02em" }}>
+            Attendance Register
+          </h1>
+        </div>
+
+        <div className="paper-card" style={{ borderRadius: 18, padding: "22px 20px", marginBottom: 18 }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+            <Gauge pct={overallStatus.pct} target={target} />
+          </div>
+          <p style={{ textAlign: "center", color: overallVerdict.color, fontWeight: 600, fontSize: 14.5, margin: "0 0 4px", lineHeight: 1.4 }}>
+            {overallVerdict.text}
+          </p>
+          <p style={{ textAlign: "center", color: PALETTE.inkSoft, fontSize: 12.5, margin: 0 }}>
+            {totals.attended} attended · {totals.total - totals.attended} missed · {totals.total} total across {subjects.length} subject{subjects.length === 1 ? "" : "s"}
+          </p>
+          <div style={{ textAlign: "center", marginTop: 10 }}>
+            <button onClick={() => setShowTargetEdit((v) => !v)} style={{ background: "none", border: "none", color: PALETTE.inkSoft, fontSize: 12, cursor: "pointer", padding: 4 }}>
+              change target {showTargetEdit ? "▲" : "▼"}
+            </button>
+            {showTargetEdit && (
+              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginTop: 8 }}>
+                <input type="range" min={50} max={95} value={target} onChange={(e) => setTarget(Number(e.target.value))} style={{ width: 140, accentColor: PALETTE.green }} />
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: PALETTE.ink, fontWeight: 700, minWidth: 34 }}>{target}%</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 2px 10px" }}>
+          <span style={{ fontFamily: "'Special Elite', monospace", color: "#F4EFDD", fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            Subjects
+          </span>
+          <span style={{ color: "rgba(244,239,221,0.55)", fontSize: 12 }}>{subjects.length}</span>
+        </div>
+
+        {subjects.length === 0 ? (
+          <div className="paper-card" style={{ borderRadius: 16, padding: "26px 20px", textAlign: "center", marginBottom: 14 }}>
+            <p style={{ color: PALETTE.inkSoft, fontSize: 13, margin: 0 }}>No subjects yet. Add one to enter classes attended and held.</p>
+          </div>
+        ) : (
+          subjects.map((s) => (
+            <SubjectCard key={s.id} subject={s} target={target} onUpdate={(next) => updateSubject(s.id, next)} onDelete={() => deleteSubject(s.id)} />
+          ))
+        )}
+
+        <button onClick={addSubject} style={{
+          width: "100%", background: "rgba(244,239,221,0.08)", border: `1.5px dashed rgba(244,239,221,0.35)`,
+          borderRadius: 14, padding: "12px 0", color: "rgba(244,239,221,0.85)", fontSize: 13.5, fontWeight: 600,
+          cursor: "pointer", marginBottom: 20,
+        }}>
+          + Add subject
+        </button>
+
+        <div style={{ textAlign: "center" }}>
+          {!confirmReset ? (
+            <button onClick={() => setConfirmReset(true)} disabled={subjects.length === 0}
+              style={{ background: "none", border: "none", color: "rgba(244,239,221,0.55)", fontSize: 12.5, cursor: "pointer" }}>
+              ↺ reset all subjects
+            </button>
+          ) : (
+            <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+              <span style={{ color: "rgba(244,239,221,0.75)", fontSize: 12.5 }}>Clear all subjects?</span>
+              <button onClick={doReset} style={{ background: PALETTE.red, color: "#F4EFDD", border: "none", borderRadius: 8, padding: "5px 12px", fontSize: 12.5, cursor: "pointer" }}>Yes, clear</button>
+              <button onClick={() => setConfirmReset(false)} style={{ background: "none", border: `1px solid rgba(244,239,221,0.4)`, color: "rgba(244,239,221,0.75)", borderRadius: 8, padding: "5px 12px", fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+            </div>
+          )}
+        </div>
+
+        <p style={{ textAlign: "center", color: "rgba(244,239,221,0.4)", fontSize: 11, marginTop: 24, letterSpacing: "0.04em" }}>
+          Created by ROHAN
+        </p>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
